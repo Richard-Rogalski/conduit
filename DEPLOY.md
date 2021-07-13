@@ -111,26 +111,8 @@ trusted_servers = ["matrix.org"]
 
 address = "127.0.0.1" # This makes sure Conduit can only be reached using the reverse proxy
 
-## sqlite
-
-# The amount of memory that the database will use, with the following formula;
-# (db_cache_capacity * (sqlite_read_pool_size + 1)), in bytes
-#db_cache_capacity = 1073741824 # in bytes, 1024 * 1024 * 1024
-
-# How many permanent read connections will be open to the database,
-# increase this if you see "creating spillover reader" in your logs.
-#sqlite_read_pool_size = 2 # default: max(cpu core count, 1)
-
-# If the database WAL (conduit.db-wal file) should be cleaned on a timer.
-#sqlite_wal_clean_timer = false
-
-# How many seconds should pass before the WAL clean task should fire.
-# Note: Is dependant on sqlite_wal_clean_timer being true.
-#sqlite_wal_clean_second_interval = 60
-
-# How long the WAL clean task should (in seconds) try to wait while
-# getting exclusive access to the database (before giving up).
-#sqlite_wal_clean_second_timeout = 2
+# The total amount of memory that the database will use.
+#db_cache_capacity_mb = 10
 ```
 
 ## Setting the correct file permissions

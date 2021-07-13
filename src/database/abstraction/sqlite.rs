@@ -58,7 +58,13 @@ impl<'a> Deref for HoldingConn<'a> {
 }
 
 impl Pool {
-    fn new<P: AsRef<Path>>(path: P, num_readers: usize, cache_size: u32) -> Result<Self> {
+    fn new<P: AsRef<Path>>(path: P, num_readers: usize, total_cache_size_mb: f64) -> Result<Self> {
+        // calculates cache-size per permanent connection
+        // 1. convert MB to KiB
+        // 2. divide by permanent connections
+        // 3. round down to nearest integer
+        let cache_size: u32 = ((total_cache_size_mb * 1024.0) / (num_readers + 1) as f64) as u32;
+
         let writer = Mutex::new(Self::prepare_conn(&path, Some(cache_size))?);
 
         let mut readers = Vec::new();
@@ -128,7 +134,7 @@ impl DatabaseEngine for Engine {
         let pool = Pool::new(
             Path::new(&config.database_path).join("conduit.db"),
             config.sqlite_read_pool_size,
-            config.db_cache_capacity / 1024, // bytes -> kb
+            config.db_cache_capacity_mb,
         )?;
 
         pool.write_lock()

@@ -43,8 +43,8 @@ use self::proxy::ProxyConfig;
 pub struct Config {
     server_name: Box<ServerName>,
     database_path: String,
-    #[serde(default = "default_db_cache_capacity")]
-    db_cache_capacity: u32,
+    #[serde(default = "default_db_cache_capacity_mb")]
+    db_cache_capacity_mb: f64,
     #[serde(default = "default_sqlite_read_pool_size")]
     sqlite_read_pool_size: usize,
     #[serde(default = "false_fn")]
@@ -105,8 +105,8 @@ fn true_fn() -> bool {
     true
 }
 
-fn default_db_cache_capacity() -> u32 {
-    1024 * 1024 * 1024
+fn default_db_cache_capacity_mb() -> f64 {
+    10.0
 }
 
 fn default_sqlite_read_pool_size() -> usize {
