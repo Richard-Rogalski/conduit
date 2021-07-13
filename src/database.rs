@@ -32,6 +32,7 @@ use std::{
     fs::{self, remove_dir_all},
     io::Write,
     ops::Deref,
+    path::Path,
     sync::{Arc, RwLock},
 };
 use tokio::sync::{OwnedRwLockReadGuard, RwLock as TokioRwLock, Semaphore};
@@ -170,8 +171,31 @@ impl Database {
         Ok(())
     }
 
+    fn check_sled_or_sqlite_db(config: &Config) {
+        let path = Path::new(&config.database_path);
+
+        let sled_exists = path.join("db").exists();
+        let sqlite_exists = path.join("conduit.db").exists();
+
+        if sled_exists {
+            if sqlite_exists {
+                // most likely an in-place directory, only warn
+                log::warn!("both sled and sqlite databases are detected in database directory");
+                log::warn!("currently running from the sqlite database, but consider removing sled database files to free up space")
+            } else {
+                log::error!(
+                    "sled database detected, conduit now uses sqlite for database operations"
+                );
+                log::error!("this database must be converted to sqlite, go to https://github.com/ShadowJonathan/conduit_toolbox#conduit_sled_to_sqlite");
+                std::process::exit(1);
+            }
+        }
+    }
+
     /// Load an existing database or create a new one.
     pub async fn load_or_create(config: Config) -> Result<Arc<TokioRwLock<Self>>> {
+        Self::check_sled_or_sqlite_db(&config);
+
         let builder = Engine::open(&config)?;
 
         if config.max_request_size < 1024 {
