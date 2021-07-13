@@ -47,7 +47,7 @@ pub struct Config {
     db_cache_capacity_mb: f64,
     #[serde(default = "default_sqlite_read_pool_size")]
     sqlite_read_pool_size: usize,
-    #[serde(default = "false_fn")]
+    #[serde(default = "true_fn")]
     sqlite_wal_clean_timer: bool,
     #[serde(default = "default_sqlite_wal_clean_second_interval")]
     sqlite_wal_clean_second_interval: u32,
@@ -106,7 +106,7 @@ fn true_fn() -> bool {
 }
 
 fn default_db_cache_capacity_mb() -> f64 {
-    10.0
+    200.0
 }
 
 fn default_sqlite_read_pool_size() -> usize {
@@ -114,7 +114,7 @@ fn default_sqlite_read_pool_size() -> usize {
 }
 
 fn default_sqlite_wal_clean_second_interval() -> u32 {
-    60
+    60 * 60
 }
 
 fn default_sqlite_wal_clean_second_timeout() -> u32 {
@@ -171,30 +171,36 @@ impl Database {
         Ok(())
     }
 
-    fn check_sled_or_sqlite_db(config: &Config) {
+    fn check_sled_or_sqlite_db(config: &Config) -> Result<()> {
         let path = Path::new(&config.database_path);
 
-        let sled_exists = path.join("db").exists();
-        let sqlite_exists = path.join("conduit.db").exists();
-
-        if sled_exists {
-            if sqlite_exists {
-                // most likely an in-place directory, only warn
-                log::warn!("both sled and sqlite databases are detected in database directory");
-                log::warn!("currently running from the sqlite database, but consider removing sled database files to free up space")
-            } else {
-                log::error!(
-                    "sled database detected, conduit now uses sqlite for database operations"
-                );
-                log::error!("this database must be converted to sqlite, go to https://github.com/ShadowJonathan/conduit_toolbox#conduit_sled_to_sqlite");
-                std::process::exit(1);
+        #[cfg(feature = "backend_sqlite")]
+        {
+            let sled_exists = path.join("db").exists();
+            let sqlite_exists = path.join("conduit.db").exists();
+            if sled_exists {
+                if sqlite_exists {
+                    // most likely an in-place directory, only warn
+                    log::warn!("Both sled and sqlite databases are detected in database directory");
+                    log::warn!("Currently running from the sqlite database, but consider removing sled database files to free up space")
+                } else {
+                    log::error!(
+                        "Sled database detected, conduit now uses sqlite for database operations"
+                    );
+                    log::error!("This database must be converted to sqlite, go to https://github.com/ShadowJonathan/conduit_toolbox#conduit_sled_to_sqlite");
+                    return Err(Error::bad_config(
+                        "sled database detected, migrate to sqlite",
+                    ));
+                }
             }
         }
+
+        Ok(())
     }
 
     /// Load an existing database or create a new one.
     pub async fn load_or_create(config: Config) -> Result<Arc<TokioRwLock<Self>>> {
-        Self::check_sled_or_sqlite_db(&config);
+        Self::check_sled_or_sqlite_db(&config)?;
 
         let builder = Engine::open(&config)?;
 

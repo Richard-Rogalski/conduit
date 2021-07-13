@@ -112,7 +112,7 @@ trusted_servers = ["matrix.org"]
 address = "127.0.0.1" # This makes sure Conduit can only be reached using the reverse proxy
 
 # The total amount of memory that the database will use.
-#db_cache_capacity_mb = 10
+#db_cache_capacity_mb = 200
 ```
 
 ## Setting the correct file permissions

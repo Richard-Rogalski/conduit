@@ -84,6 +84,9 @@ impl ServerCertVerifier for MatrixServerVerifier {
     }
 }
 
+/// Handles "rotation" of long-polling requests. "Rotation" in this context is similar to "rotation" of log files and the like.
+///
+/// This is utilized to have sync workers return early and release read locks on the database.
 pub struct RotationHandler(broadcast::Sender<()>, broadcast::Receiver<()>);
 
 impl RotationHandler {
