@@ -164,4 +164,4 @@ opt-level = 3
 [profile.release.package."*"]
 opt-level = 3
 [patch.crates-io]
-ring = { git = "https://github.com/ibm/ring.git", branch = "ppc-0.16.20" }
+ring = { git = "https://github.com/Richard-Rogalski/ring.git", branch = "ppc-0.16.20" }
