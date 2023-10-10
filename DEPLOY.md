@@ -10,7 +10,7 @@
 Although you might be able to compile Conduit for Windows, we do recommend running it on a Linux server. We therefore
 only offer Linux binaries.
 
-You may simply download the binary that fits your machine. Run `uname -m` to see what you need. Now copy the right url:
+You may simply download the binary that fits your machine. Run `uname -m` to see what you need. Now copy the appropriate url:
 
 | CPU Architecture                            | Download stable version                                         | Download development version                                |
 | ------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------- |
@@ -81,7 +81,7 @@ you to make sure that the file permissions are correctly set up.
 In Debian or RHEL, you can use this command to create a Conduit user:
 
 ```bash
-sudo adduser --system conduit --no-create-home
+sudo adduser --system conduit --group --disabled-login --no-create-home
 ```
 
 ## Forwarding ports in the firewall or the router
@@ -117,8 +117,7 @@ After=network.target
 [Service]
 Environment="CONDUIT_CONFIG=/etc/matrix-conduit/conduit.toml"
 User=conduit
-Group=nogroup
-# On RHEL: Group=nobody
+Group=conduit
 Restart=always
 ExecStart=/usr/local/bin/matrix-conduit
 
@@ -173,6 +172,7 @@ max_request_size = 20_000_000 # in bytes
 allow_registration = true
 
 allow_federation = true
+allow_check_for_updates = true
 
 # Server to get public keys from. You probably shouldn't change this
 trusted_servers = ["matrix.org"]
@@ -198,8 +198,7 @@ If you use the default database path you also need to run this:
 
 ```bash
 sudo mkdir -p /var/lib/matrix-conduit/
-sudo chown -R conduit:nogroup /var/lib/matrix-conduit/
-# On RHEL: sudo chown -R conduit:nobody /var/lib/matrix-conduit/
+sudo chown -R conduit:conduit /var/lib/matrix-conduit/
 sudo chmod 700 /var/lib/matrix-conduit/
 ```
 

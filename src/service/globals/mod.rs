@@ -1,7 +1,8 @@
 mod data;
 pub use data::Data;
 use ruma::{
-    OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedServerName, OwnedServerSigningKeyId, OwnedUserId,
+    serde::Base64, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedServerName,
+    OwnedServerSigningKeyId, OwnedUserId,
 };
 
 use crate::api::server_server::FedDest;
@@ -14,19 +15,23 @@ use ruma::{
     },
     DeviceId, RoomVersionId, ServerName, UserId,
 };
-use std::sync::atomic::{self, AtomicBool};
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
     future::Future,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    sync::{Arc, Mutex, RwLock},
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc, Mutex, RwLock,
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::{broadcast, watch::Receiver, Mutex as TokioMutex, Semaphore};
 use tracing::{error, info};
 use trust_dns_resolver::TokioAsyncResolver;
+
+use base64::{engine::general_purpose, Engine as _};
 
 type WellKnownMap = HashMap<OwnedServerName, (FedDest, String)>;
 type TlsNameMap = HashMap<String, (Vec<IpAddr>, u16)>;
@@ -206,6 +211,16 @@ impl Service {
         self.db.current_count()
     }
 
+    #[tracing::instrument(skip(self))]
+    pub fn last_check_for_updates_id(&self) -> Result<u64> {
+        self.db.last_check_for_updates_id()
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub fn update_check_for_updates_id(&self, id: u64) -> Result<()> {
+        self.db.update_check_for_updates_id(id)
+    }
+
     pub async fn watch(&self, user_id: &UserId, device_id: &DeviceId) -> Result<()> {
         self.db.watch(user_id, device_id).await
     }
@@ -252,6 +267,10 @@ impl Service {
 
     pub fn enable_lightning_bolt(&self) -> bool {
         self.config.enable_lightning_bolt
+    }
+
+    pub fn allow_check_for_updates(&self) -> bool {
+        self.config.allow_check_for_updates
     }
 
     pub fn trusted_servers(&self) -> &[OwnedServerName] {
@@ -316,7 +335,19 @@ impl Service {
         &self,
         origin: &ServerName,
     ) -> Result<BTreeMap<OwnedServerSigningKeyId, VerifyKey>> {
-        self.db.signing_keys_for(origin)
+        let mut keys = self.db.signing_keys_for(origin)?;
+        if origin == self.server_name() {
+            keys.insert(
+                format!("ed25519:{}", services().globals.keypair().version())
+                    .try_into()
+                    .expect("found invalid server signing keys in DB"),
+                VerifyKey {
+                    key: Base64::new(self.keypair.public_key().to_vec()),
+                },
+            );
+        }
+
+        Ok(keys)
     }
 
     pub fn database_version(&self) -> Result<u64> {
@@ -338,8 +369,12 @@ impl Service {
         let mut r = PathBuf::new();
         r.push(self.config.database_path.clone());
         r.push("media");
-        r.push(base64::encode_config(key, base64::URL_SAFE_NO_PAD));
+        r.push(general_purpose::URL_SAFE_NO_PAD.encode(key));
         r
+    }
+
+    pub fn well_known_client(&self) -> &Option<String> {
+        &self.config.well_known_client
     }
 
     pub fn shutdown(&self) {

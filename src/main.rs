@@ -40,7 +40,7 @@ use tower_http::{
     trace::TraceLayer,
     ServiceBuilderExt as _,
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 pub use conduit::*; // Re-export everything from the library crate
@@ -54,7 +54,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
 async fn main() {
-    // Initialize DB
+    // Initialize config
     let raw_config =
         Figment::new()
             .merge(
@@ -75,6 +75,8 @@ async fn main() {
 
     config.warn_deprecated();
 
+    let log = format!("{},ruma_state_res=error,_=off,sled=off", config.log);
+
     if config.allow_jaeger {
         opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
         let tracer = opentelemetry_jaeger::new_agent_pipeline()
@@ -84,7 +86,7 @@ async fn main() {
             .unwrap();
         let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-        let filter_layer = match EnvFilter::try_new(&config.log) {
+        let filter_layer = match EnvFilter::try_new(&log) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!(
@@ -111,7 +113,7 @@ async fn main() {
     } else {
         let registry = tracing_subscriber::Registry::default();
         let fmt_layer = tracing_subscriber::fmt::Layer::new();
-        let filter_layer = match EnvFilter::try_new(&config.log) {
+        let filter_layer = match EnvFilter::try_new(&log) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("It looks like your config is invalid. The following error occured while parsing it: {e}");
@@ -122,6 +124,16 @@ async fn main() {
         let subscriber = registry.with(filter_layer).with(fmt_layer);
         tracing::subscriber::set_global_default(subscriber).unwrap();
     }
+
+    // This is needed for opening lots of file descriptors, which tends to
+    // happen more often when using RocksDB and making lots of federation
+    // connections at startup. The soft limit is usually 1024, and the hard
+    // limit is usually 512000; I've personally seen it hit >2000.
+    //
+    // * https://www.freedesktop.org/software/systemd/man/systemd.exec.html#id-1.12.2.1.17.6
+    // * https://github.com/systemd/systemd/commit/0abf94923b4a95a7d89bc526efc84e7ca2b71741
+    #[cfg(unix)]
+    maximize_fd_limit().expect("should be able to increase the soft limit to the hard limit");
 
     info!("Loading database");
     if let Err(error) = KeyValueDatabase::load_or_create(config).await {
@@ -357,6 +369,7 @@ fn routes() -> Router {
                 .put(client_server::send_state_event_for_empty_key_route),
         )
         .ruma_route(client_server::sync_events_route)
+        .ruma_route(client_server::sync_events_v4_route)
         .ruma_route(client_server::get_context_route)
         .ruma_route(client_server::get_message_events_route)
         .ruma_route(client_server::search_events_route)
@@ -422,6 +435,7 @@ fn routes() -> Router {
             "/_matrix/client/v3/rooms/:room_id/initialSync",
             get(initial_sync),
         )
+        .route("/", get(it_works))
         .fallback(not_found)
 }
 
@@ -469,6 +483,10 @@ async fn initial_sync(_uri: Uri) -> impl IntoResponse {
         ErrorKind::GuestAccessForbidden,
         "Guest access not implemented",
     )
+}
+
+async fn it_works() -> &'static str {
+    "Hello from Conduit!"
 }
 
 trait RouterExt {
@@ -548,4 +566,22 @@ fn method_to_filter(method: Method) -> MethodFilter {
         Method::TRACE => MethodFilter::TRACE,
         m => panic!("Unsupported HTTP method: {m:?}"),
     }
+}
+
+#[cfg(unix)]
+#[tracing::instrument(err)]
+fn maximize_fd_limit() -> Result<(), nix::errno::Errno> {
+    use nix::sys::resource::{getrlimit, setrlimit, Resource};
+
+    let res = Resource::RLIMIT_NOFILE;
+
+    let (soft_limit, hard_limit) = getrlimit(res)?;
+
+    debug!("Current nofile soft limit: {soft_limit}");
+
+    setrlimit(res, hard_limit, hard_limit)?;
+
+    debug!("Increased nofile soft limit to {hard_limit}");
+
+    Ok(())
 }

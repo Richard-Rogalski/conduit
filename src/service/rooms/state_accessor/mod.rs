@@ -9,8 +9,10 @@ use lru_cache::LruCache;
 use ruma::{
     events::{
         room::{
+            avatar::RoomAvatarEventContent,
             history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
             member::{MembershipState, RoomMemberEventContent},
+            name::RoomNameEventContent,
         },
         StateEventType,
     },
@@ -268,5 +270,43 @@ impl Service {
         state_key: &str,
     ) -> Result<Option<Arc<PduEvent>>> {
         self.db.room_state_get(room_id, event_type, state_key)
+    }
+
+    pub fn get_name(&self, room_id: &RoomId) -> Result<Option<String>> {
+        services()
+            .rooms
+            .state_accessor
+            .room_state_get(&room_id, &StateEventType::RoomName, "")?
+            .map_or(Ok(None), |s| {
+                serde_json::from_str(s.content.get())
+                    .map(|c: RoomNameEventContent| c.name)
+                    .map_err(|_| Error::bad_database("Invalid room name event in database."))
+            })
+    }
+
+    pub fn get_avatar(&self, room_id: &RoomId) -> Result<Option<RoomAvatarEventContent>> {
+        services()
+            .rooms
+            .state_accessor
+            .room_state_get(&room_id, &StateEventType::RoomAvatar, "")?
+            .map_or(Ok(None), |s| {
+                serde_json::from_str(s.content.get())
+                    .map_err(|_| Error::bad_database("Invalid room avatar event in database."))
+            })
+    }
+
+    pub fn get_member(
+        &self,
+        room_id: &RoomId,
+        user_id: &UserId,
+    ) -> Result<Option<RoomMemberEventContent>> {
+        services()
+            .rooms
+            .state_accessor
+            .room_state_get(&room_id, &StateEventType::RoomMember, user_id.as_str())?
+            .map_or(Ok(None), |s| {
+                serde_json::from_str(s.content.get())
+                    .map_err(|_| Error::bad_database("Invalid room member event in database."))
+            })
     }
 }

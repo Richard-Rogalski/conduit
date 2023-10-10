@@ -55,7 +55,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, trace, warn};
 
 /// Wraps either an literal IP address plus port, or a hostname plus complement
 /// (colon-plus-port if it was specified).
@@ -121,6 +121,12 @@ where
 {
     if !services().globals.allow_federation() {
         return Err(Error::bad_config("Federation is disabled."));
+    }
+
+    if destination == services().globals.server_name() {
+        return Err(Error::bad_config(
+            "Won't send federation request to ourselves",
+        ));
     }
 
     debug!("Preparing to send request to {destination}");
@@ -500,7 +506,8 @@ async fn request_well_known(destination: &str) -> Option<String> {
         .await;
     debug!("Got well known response");
     if let Err(e) = &response {
-        error!("Well known error: {e:?}");
+        debug!("Well known error: {e:?}");
+        return None;
     }
     let text = response.ok()?.text().await;
     debug!("Got well known response text");
@@ -700,11 +707,29 @@ pub async fn send_transaction_message_route(
     // let mut auth_cache = EventMap::new();
 
     for pdu in &body.pdus {
+        let value: CanonicalJsonObject = serde_json::from_str(pdu.get()).map_err(|e| {
+            warn!("Error parsing incoming event {:?}: {:?}", pdu, e);
+            Error::BadServerResponse("Invalid PDU in server response")
+        })?;
+        let room_id: OwnedRoomId = value
+            .get("room_id")
+            .and_then(|id| RoomId::parse(id.as_str()?).ok())
+            .ok_or(Error::BadRequest(
+                ErrorKind::InvalidParam,
+                "Invalid room id in pdu",
+            ))?;
+
+        if services().rooms.state.get_room_version(&room_id).is_err() {
+            debug!("Server is not in room {room_id}");
+            continue;
+        }
+
         let r = parse_incoming_pdu(&pdu);
         let (event_id, value, room_id) = match r {
             Ok(t) => t,
             Err(e) => {
-                warn!("Could not parse pdu: {e}");
+                warn!("Could not parse PDU: {e}");
+                warn!("Full PDU: {:?}", &pdu);
                 continue;
             }
         };
@@ -805,7 +830,7 @@ pub async fn send_transaction_message_route(
                                 .readreceipt_update(&user_id, &room_id, event)?;
                         } else {
                             // TODO fetch missing events
-                            info!("No known event ids in read receipt: {:?}", user_updates);
+                            debug!("No known event ids in read receipt: {:?}", user_updates);
                         }
                     }
                 }
@@ -909,6 +934,7 @@ pub async fn send_transaction_message_route(
                         &master_key,
                         &self_signing_key,
                         &None,
+                        true,
                     )?;
                 }
             }
@@ -919,7 +945,7 @@ pub async fn send_transaction_message_route(
     Ok(send_transaction_message::v1::Response {
         pdus: resolved_map
             .into_iter()
-            .map(|(e, r)| (e, r.map_err(|e| e.to_string())))
+            .map(|(e, r)| (e, r.map_err(|e| e.sanitized_error())))
             .collect(),
     })
 }
@@ -945,7 +971,10 @@ pub async fn get_event_route(
         .rooms
         .timeline
         .get_pdu_json(&body.event_id)?
-        .ok_or(Error::BadRequest(ErrorKind::NotFound, "Event not found."))?;
+        .ok_or_else(|| {
+            warn!("Event not found, event ID: {:?}", &body.event_id);
+            Error::BadRequest(ErrorKind::NotFound, "Event not found.")
+        })?;
 
     let room_id_str = event
         .get("room_id")
@@ -1000,7 +1029,7 @@ pub async fn get_backfill_route(
         .as_ref()
         .expect("server is authenticated");
 
-    info!("Got backfill request from: {}", sender_servername);
+    debug!("Got backfill request from: {}", sender_servername);
 
     if !services()
         .rooms
@@ -1185,7 +1214,10 @@ pub async fn get_event_authorization_route(
         .rooms
         .timeline
         .get_pdu_json(&body.event_id)?
-        .ok_or(Error::BadRequest(ErrorKind::NotFound, "Event not found."))?;
+        .ok_or_else(|| {
+            warn!("Event not found, event ID: {:?}", &body.event_id);
+            Error::BadRequest(ErrorKind::NotFound, "Event not found.")
+        })?;
 
     let room_id_str = event
         .get("room_id")
@@ -1800,12 +1832,14 @@ pub async fn get_devices_route(
                 })
             })
             .collect(),
-        master_key: services()
-            .users
-            .get_master_key(&body.user_id, &|u| u.server_name() == sender_servername)?,
+        master_key: services().users.get_master_key(None, &body.user_id, &|u| {
+            u.server_name() == sender_servername
+        })?,
         self_signing_key: services()
             .users
-            .get_self_signing_key(&body.user_id, &|u| u.server_name() == sender_servername)?,
+            .get_self_signing_key(None, &body.user_id, &|u| {
+                u.server_name() == sender_servername
+            })?,
     })
 }
 
